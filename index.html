@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>مكتبتي الذكية | MPL</title>
+    <link rel="manifest" href="manifest.json">
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color:#0f172a; color:#f8fafc; font-family:'Cairo','Segoe UI',sans-serif; }
+        .glass-card { background:rgba(30,41,59,0.7); backdrop-filter:blur(10px); border:1px solid rgba(255,255,255,0.1); transition:all 0.3s ease; }
+        .folder-card:hover { transform:translateY(-5px); border-color:#3b82f6; box-shadow:0 10px 20px -5px rgba(59,130,246,0.3); }
+        .hidden-view { display:none; }
+        ::-webkit-scrollbar { width:8px; }
+        ::-webkit-scrollbar-track { background:#0f172a; }
+        ::-webkit-scrollbar-thumb { background:#1e293b; border-radius:10px; }
+
+        /* شاشة تحميل */
+        #loading-screen {
+            position:fixed; inset:0; background:#0f172a;
+            display:flex; flex-direction:column; align-items:center; justify-content:center;
+            z-index:100; transition:opacity 0.5s ease;
+        }
+        .spinner {
+            width:48px; height:48px;
+            border:4px solid rgba(59,130,246,0.2);
+            border-top-color:#3b82f6;
+            border-radius:50%;
+            animation:spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform:rotate(360deg); } }
+
+        /* بطاقة المستخدم */
+        #user-card {
+            display:flex; align-items:center; gap:10px;
+            background:rgba(30,41,59,0.8);
+            border:1px solid rgba(255,255,255,0.08);
+            border-radius:16px; padding:8px 14px;
+        }
+        #user-avatar { width:34px; height:34px; border-radius:50%; border:2px solid #3b82f6; object-fit:cover; }
+        #user-name { font-size:13px; font-weight:700; color:#cbd5e1; max-width:130px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        #btn-logout {
+            font-size:12px; font-weight:700; color:#ef4444;
+            background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.2);
+            border-radius:8px; padding:4px 10px; cursor:pointer; transition:all 0.2s;
+        }
+        #btn-logout:hover { background:rgba(239,68,68,0.2); }
+
+        /* إشعار مزامنة */
+        #sync-status {
+            position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
+            background:rgba(15,23,42,0.95); border:1px solid rgba(255,255,255,0.1);
+            border-radius:12px; padding:10px 20px;
+            font-size:13px; font-weight:600; color:#94a3b8;
+            backdrop-filter:blur(12px); z-index:50;
+            opacity:0; transition:opacity 0.3s ease; pointer-events:none;
+            font-family:'Cairo',sans-serif;
+        }
+        #sync-status.show { opacity:1; }
+        #sync-status.ok  { color:#34d399; border-color:rgba(52,211,153,0.3); }
+        #sync-status.err { color:#f87171; border-color:rgba(248,113,113,0.3); }
+    </style>
+</head>
+<body class="antialiased min-h-screen">
+
+<!-- شاشة التحميل -->
+<div id="loading-screen">
+    <div class="spinner mb-4"></div>
+    <p style="color:#64748b; font-size:14px; font-family:'Cairo',sans-serif;">جاري التحقق من هويتك…</p>
+</div>
+
+<!-- إشعار مزامنة -->
+<div id="sync-status"></div>
+
+<!-- التطبيق الرئيسي -->
+<div id="app" style="display:none;">
+    <div class="container mx-auto px-4 py-6 md:py-12 max-w-6xl">
+
+        <div id="main-view">
+            <header class="flex flex-col md:flex-row justify-between items-center gap-6 mb-12">
+                <div class="text-center md:text-right">
+                    <h1 class="text-3xl md:text-4xl font-black text-blue-400">مكتبتي الرقمية</h1>
+                    <p class="text-slate-400 mt-2">نظم مصادرك التعليمية في مكان واحد</p>
+                </div>
+                <div class="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+                    <div id="user-card">
+                        <img id="user-avatar" src="" alt="avatar" style="display:none;">
+                        <span id="user-name"></span>
+                        <button id="btn-logout" onclick="doLogout()">خروج</button>
+                    </div>
+                    <button onclick="toggleModal()"
+                        class="w-full sm:w-auto bg-blue-600 hover:bg-blue-500 text-white px-8 py-4 rounded-2xl font-bold shadow-lg transition-all active:scale-95 text-lg">
+                        + إضافة مصدر
+                    </button>
+                </div>
+            </header>
+
+            <div class="relative max-w-2xl mx-auto mb-12">
+                <input type="text" id="global-search" oninput="handleSearch(this.value)"
+                    placeholder="ابحث في العناوين، المواضيع، أو الروابط..."
+                    class="w-full p-5 pr-14 bg-slate-800/50 rounded-2xl border border-slate-700 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all shadow-xl">
+                <span class="absolute right-5 top-5 text-2xl opacity-40">🔍</span>
+            </div>
+
+            <main id="main-content-area" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-8"></main>
+        </div>
+
+        <div id="topics-view" class="hidden-view">
+            <button onclick="showMainView()" class="mb-8 flex items-center gap-2 text-blue-400 hover:text-blue-300 font-bold transition-colors">
+                <span class="text-xl">→</span> العودة للمجلدات الرئيسية
+            </button>
+            <h2 id="current-type-title" class="text-2xl md:text-3xl font-bold mb-8 border-r-4 border-blue-500 pr-4"></h2>
+            <div id="topics-container" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+        </div>
+
+        <div id="links-view" class="hidden-view">
+            <button onclick="backToTopics()" class="mb-8 flex items-center gap-2 text-blue-400 hover:text-blue-300 font-bold transition-colors">
+                <span class="text-xl">→</span> العودة لقائمة المواضيع
+            </button>
+            <h2 id="current-topic-title" class="text-2xl md:text-3xl font-bold mb-8 text-blue-300"></h2>
+            <div id="links-container" class="grid grid-cols-1 lg:grid-cols-2 gap-4"></div>
+        </div>
+
+    </div>
+</div>
+
+<!-- Modal إضافة رابط -->
+<div id="modal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+    <div class="glass-card p-6 md:p-8 rounded-3xl w-full max-w-md shadow-2xl">
+        <h2 class="text-2xl mb-6 font-bold text-center text-blue-400">إضافة رابط جديد</h2>
+        <div class="space-y-4">
+            <input id="link-title" type="text" placeholder="اسم الفيديو أو الكتاب..."
+                class="w-full p-4 bg-slate-800 rounded-xl border border-slate-700 outline-none focus:border-blue-500">
+            <input id="link-topic" type="text" placeholder="الموضوع (مثلاً: كورس Excel)..."
+                class="w-full p-4 bg-slate-800 rounded-xl border border-slate-700 outline-none focus:border-blue-500">
+            <input id="link-url" type="url" placeholder="انسخ الرابط هنا..."
+                class="w-full p-4 bg-slate-800 rounded-xl border border-slate-700 outline-none focus:border-blue-500">
+        </div>
+        <div class="flex gap-4 mt-8">
+            <button onclick="addResource()" class="flex-1 bg-blue-600 hover:bg-blue-500 p-4 rounded-xl font-bold transition-all shadow-lg active:scale-95">حفظ</button>
+            <button onclick="toggleModal()" class="flex-1 bg-slate-700 hover:bg-slate-600 p-4 rounded-xl font-bold transition-all">إلغاء</button>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+import { initializeApp }
+    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getAuth, onAuthStateChanged, signOut }
+    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import { getFirestore, collection, doc, addDoc, getDocs, deleteDoc, query, orderBy }
+    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+/* ── Firebase config ── */
+const firebaseConfig = {
+    apiKey:            "AIzaSyAiPjdGhb0Atjv3i6yIfDI6APBiV70AffU",
+    authDomain:        "my-personal-library-25c7e.firebaseapp.com",
+    projectId:         "my-personal-library-25c7e",
+    storageBucket:     "my-personal-library-25c7e.firebasestorage.app",
+    messagingSenderId: "298605799268",
+    appId:             "1:298605799268:web:5e20d96dd114e8206bfc71",
+    measurementId:     "G-C1JER6D38E"
+};
+
+const app  = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db   = getFirestore(app);
+
+/* ── State ── */
+let currentUser     = null;
+let myLibrary       = [];
+let currentOpenType = '';
+
+/* ── DOM refs ── */
+const loadingEl  = document.getElementById('loading-screen');
+const appEl      = document.getElementById('app');
+const syncEl     = document.getElementById('sync-status');
+
+/* ── Sync notification ── */
+function showSync(msg, type = '') {
+    syncEl.textContent = msg;
+    syncEl.className   = `show ${type}`;
+    clearTimeout(syncEl._t);
+    syncEl._t = setTimeout(() => { syncEl.className = ''; }, 2600);
+}
+
+/* ── User's Firestore collection ── */
+function userCol() {
+    return collection(db, 'users', currentUser.uid, 'library');
+}
+
+/* ════════════════════════════════
+   AUTH GUARD
+════════════════════════════════ */
+onAuthStateChanged(auth, async user => {
+    if (!user) {
+        window.location.replace('login.html');
+        return;
+    }
+    currentUser = user;
+
+    /* اعرض بيانات المستخدم */
+    const nameEl   = document.getElementById('user-name');
+    const avatarEl = document.getElementById('user-avatar');
+    nameEl.textContent = user.displayName || 'مستخدم';
+    if (user.photoURL) {
+        avatarEl.src          = user.photoURL;
+        avatarEl.style.display = 'block';
+    }
+
+    await loadLibrary();
+
+    /* اخبي شاشة التحميل وأظهر التطبيق */
+    loadingEl.style.opacity = '0';
+    setTimeout(() => {
+        loadingEl.style.display = 'none';
+        appEl.style.display     = 'block';
+    }, 500);
+});
+
+/* ════════════════════════════════
+   LOAD FROM FIRESTORE
+════════════════════════════════ */
+async function loadLibrary() {
+    try {
+        const q    = query(userCol(), orderBy('createdAt', 'desc'));
+        const snap = await getDocs(q);
+        myLibrary  = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+        /* ترحيل بيانات localStorage القديمة تلقائياً */
+        const local = JSON.parse(localStorage.getItem('myLibrary') || '[]');
+        if (local.length > 0 && myLibrary.length === 0) {
+            showSync('⏳ جاري ترحيل بياناتك للسحابة…');
+            for (const item of local) {
+                const ref = await addDoc(userCol(), {
+                    title:     item.title,
+                    topic:     item.topic || 'عام',
+                    url:       item.url,
+                    type:      item.type,
+                    createdAt: item.id || Date.now()
+                });
+                myLibrary.unshift({ id: ref.id, title:item.title, topic:item.topic||'عام', url:item.url, type:item.type, createdAt:item.id||Date.now() });
+            }
+            localStorage.removeItem('myLibrary');
+            showSync('✓ تم ترحيل بياناتك بنجاح', 'ok');
+        }
+        renderMain();
+    } catch (e) {
+        console.error('loadLibrary:', e);
+        showSync('تعذّر تحميل المكتبة', 'err');
+    }
+}
+
+/* ════════════════════════════════
+   ADD RESOURCE
+════════════════════════════════ */
+window.addResource = async function() {
+    const title = document.getElementById('link-title').value.trim();
+    const topic = document.getElementById('link-topic').value.trim() || 'عام';
+    const url   = document.getElementById('link-url').value.trim();
+    if (!title || !url) { alert('البيانات ناقصة!'); return; }
+
+    const type = (url.includes('youtube.com') || url.includes('youtu.be'))
+                 ? '🎥 فيديوهات' : '📚 كتب وأبحاث';
+    const data = { title, topic, url, type, createdAt: Date.now() };
+
+    showSync('⏳ جاري الحفظ…');
+    try {
+        const ref = await addDoc(userCol(), data);
+        myLibrary.unshift({ id: ref.id, ...data });
+        showSync('✓ تم الحفظ', 'ok');
+        renderMain();
+        toggleModal();
+        ['link-title','link-topic','link-url'].forEach(id => document.getElementById(id).value = '');
+    } catch (e) {
+        console.error('addResource:', e);
+        showSync('خطأ في الحفظ', 'err');
+    }
+};
+
+/* ════════════════════════════════
+   DELETE
+════════════════════════════════ */
+window.deleteItem = async function(id, topic) {
+    if (!confirm('هل تريد حذف هذا الرابط؟')) return;
+    showSync('⏳ جاري الحذف…');
+    try {
+        await deleteDoc(doc(db, 'users', currentUser.uid, 'library', id));
+        myLibrary = myLibrary.filter(i => i.id !== id);
+        showSync('✓ تم الحذف', 'ok');
+        myLibrary.filter(i => i.topic === topic).length > 0
+            ? showLinks(topic) : backToTopics();
+    } catch (e) {
+        console.error('deleteItem:', e);
+        showSync('خطأ في الحذف', 'err');
+    }
+};
+
+/* ════════════════════════════════
+   LOGOUT
+════════════════════════════════ */
+window.doLogout = async function() {
+    await signOut(auth);
+    window.location.replace('login.html');
+};
+
+/* ════════════════════════════════
+   RENDER FUNCTIONS
+════════════════════════════════ */
+window.renderMain = function() {
+    const c = document.getElementById('main-content-area');
+    c.innerHTML = '';
+    const types = [...new Set(myLibrary.map(i => i.type))];
+    if (!types.length) {
+        c.innerHTML = `<div class="col-span-full py-20 text-center glass-card rounded-3xl opacity-50 border-dashed border-2">ابدأ بإضافة أول رابط لمكتبتك الآن..</div>`;
+        return;
+    }
+    types.forEach(type => {
+        const count = myLibrary.filter(i => i.type === type).length;
+        const card  = document.createElement('div');
+        card.className = 'glass-card folder-card p-6 md:p-10 rounded-[2rem] text-center shadow-xl cursor-pointer';
+        card.onclick   = () => showTopics(type);
+        card.innerHTML = `<div class="text-5xl md:text-6xl mb-6">${type.split(' ')[0]}</div>
+                          <h3 class="text-xl font-bold">${type.split(' ').slice(1).join(' ')}</h3>
+                          <p class="text-sm opacity-50 mt-2">${count} مصدر</p>`;
+        c.appendChild(card);
+    });
+};
+
+window.showTopics = function(type) {
+    currentOpenType = type;
+    document.getElementById('main-view').classList.add('hidden-view');
+    document.getElementById('topics-view').classList.remove('hidden-view');
+    document.getElementById('current-type-title').innerText = type;
+    const topics = [...new Set(myLibrary.filter(i => i.type === type).map(i => i.topic))];
+    document.getElementById('topics-container').innerHTML = topics.map(topic => {
+        const count = myLibrary.filter(i => i.topic === topic && i.type === type).length;
+        const safe  = topic.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+        return `<div class="glass-card p-6 rounded-2xl flex justify-between items-center cursor-pointer hover:bg-blue-600/10 group border-r-4 border-blue-500" onclick="showLinks('${safe}')">
+                    <div><h4 class="font-bold text-lg">${topic}</h4><p class="text-xs opacity-50">${count} روابط</p></div>
+                    <span class="text-blue-400 group-hover:translate-x-[-5px] transition-transform">←</span>
+                </div>`;
+    }).join('');
+};
+
+window.showLinks = function(topic) {
+    document.getElementById('topics-view').classList.add('hidden-view');
+    document.getElementById('links-view').classList.remove('hidden-view');
+    document.getElementById('current-topic-title').innerText = topic;
+    const links = myLibrary.filter(i => i.topic === topic && i.type === currentOpenType);
+    const safe  = topic.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    document.getElementById('links-container').innerHTML = links.map(link => `
+        <div class="glass-card p-5 rounded-2xl flex justify-between items-center group shadow-md hover:border-blue-500/50">
+            <div class="truncate flex-1 ml-4">
+                <h4 class="font-bold mb-1">${link.title}</h4>
+                <p class="text-[10px] text-blue-400 opacity-70 truncate">${link.url}</p>
+            </div>
+            <div class="flex gap-3 flex-shrink-0">
+                <button onclick="deleteItem('${link.id}','${safe}')" class="text-red-500/40 hover:text-red-500 transition-colors text-lg">🗑</button>
+                <a href="${link.url}" target="_blank" class="bg-blue-600 px-4 py-2 rounded-lg text-xs font-bold hover:bg-blue-500 transition-all shadow-lg">فتح</a>
+            </div>
+        </div>`).join('');
+};
+
+window.showMainView = function() {
+    document.getElementById('topics-view').classList.add('hidden-view');
+    document.getElementById('main-view').classList.remove('hidden-view');
+    renderMain();
+};
+
+window.backToTopics = function() {
+    document.getElementById('links-view').classList.add('hidden-view');
+    showTopics(currentOpenType);
+};
+
+window.toggleModal = function() {
+    document.getElementById('modal').classList.toggle('hidden');
+};
+
+window.handleSearch = function(q) {
+    const c = document.getElementById('main-content-area');
+    if (!q) { renderMain(); return; }
+    const filtered = myLibrary.filter(i =>
+        i.title.toLowerCase().includes(q.toLowerCase()) ||
+        i.topic.toLowerCase().includes(q.toLowerCase())
+    );
+    c.innerHTML = filtered.length === 0
+        ? '<div class="col-span-full text-center py-10 opacity-40">لا توجد نتائج</div>'
+        : filtered.map(link => `
+            <div class="glass-card p-4 rounded-xl col-span-full flex justify-between items-center gap-4">
+                <div class="truncate flex-1"><b>${link.title}</b><br><small class="opacity-50">${link.topic}</small></div>
+                <a href="${link.url}" target="_blank" class="bg-blue-600 px-4 py-2 rounded-lg text-xs font-bold flex-shrink-0">فتح</a>
+            </div>`).join('');
+};
+
+/* Service Worker */
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+
+/* Share Target */
+window.addEventListener('DOMContentLoaded', () => {
+    const p = new URLSearchParams(window.location.search);
+    const sharedUrl   = p.get('url') || p.get('text');
+    const sharedTitle = p.get('title');
+    if (sharedUrl) {
+        toggleModal();
+        document.getElementById('link-url').value   = sharedUrl;
+        document.getElementById('link-title').value = sharedTitle || 'رابط مشترك جديد';
+        window.history.replaceState({}, document.title, window.location.pathname);
+    }
+});
+</script>
+</body>
+</html>

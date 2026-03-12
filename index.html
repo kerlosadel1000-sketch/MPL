@@ -562,4 +562,264 @@ window.selectTopicOption = function(t) {
     buildExistingTopics();
 };
 
-/* تعرف ذ
+/* تعرف ذكي على الرابط */
+window.onUrlInput = function(url) {
+    if (!url) { document.getElementById('smart-hint').classList.remove('show'); return; }
+    const hint = document.getElementById('smart-hint');
+    const hintText = document.getElementById('smart-hint-text');
+
+    /* يوتيوب */
+    if (url.includes('youtube.com') || url.includes('youtu.be')) {
+        const videoFolder = myLibrary.find(i => i.folder && (i.folder.includes('فيديو') || i.icon==='🎥'));
+        if (videoFolder) {
+            hintText.textContent = `رابط يوتيوب — تم اختيار مجلد "${videoFolder.folder}" تلقائياً، عدّل إن أردت`;
+            hint.classList.add('show');
+            selectFolderOption(videoFolder.folder, videoFolder.icon);
+        } else {
+            hintText.textContent = 'رابط يوتيوب — اختر مجلداً أو أنشئ واحداً جديداً';
+            hint.classList.add('show');
+            if (!selectedFolder) { selectedIcon = '🎥'; buildIconGrid(); }
+        }
+        return;
+    }
+
+    /* مواقع شهيرة */
+    const siteMap = [
+        { test: /github\.com/,    icon:'💻', hint:'GitHub — كود ومشاريع' },
+        { test: /twitter\.com|x\.com/, icon:'🐦', hint:'Twitter/X' },
+        { test: /linkedin\.com/,  icon:'💼', hint:'LinkedIn' },
+        { test: /medium\.com/,    icon:'📰', hint:'مقالة على Medium' },
+        { test: /arxiv\.org/,     icon:'🔬', hint:'بحث علمي — arXiv' },
+        { test: /coursera\.org|udemy\.com|edx\.org/, icon:'🎓', hint:'كورس تعليمي' },
+        { test: /spotify\.com/,   icon:'🎵', hint:'Spotify' },
+        { test: /instagram\.com/, icon:'🖼️', hint:'Instagram' },
+    ];
+    const match = siteMap.find(s => s.test.test(url));
+    if (match) {
+        hintText.textContent = `${match.hint} — اختر المجلد المناسب`;
+        hint.classList.add('show');
+        if (!selectedFolder) { selectedIcon = match.icon; buildIconGrid(); }
+    } else {
+        hint.classList.remove('show');
+    }
+
+    buildExistingTopics();
+};
+
+/* فتح الـ modal */
+window.openModal = function(prefillUrl='', prefillTitle='') {
+    selectedFolder = '';
+    selectedIcon   = '📁';
+    document.getElementById('link-url').value   = prefillUrl;
+    document.getElementById('link-title').value = prefillTitle;
+    document.getElementById('link-topic').value = '';
+    document.getElementById('new-folder-name').value = '';
+    document.getElementById('smart-hint').classList.remove('show');
+    buildIconGrid();
+    buildExistingFolders();
+    buildExistingTopics();
+    if (prefillUrl) onUrlInput(prefillUrl);
+    document.getElementById('modal').style.display = 'flex';
+};
+
+window.closeModal = function() {
+    document.getElementById('modal').style.display = 'none';
+};
+
+/* ══ Add Resource ══ */
+window.addResource = async function() {
+    const url   = document.getElementById('link-url').value.trim();
+    const title = document.getElementById('link-title').value.trim();
+    const topic = document.getElementById('link-topic').value.trim() || 'عام';
+
+    /* المجلد الخارجي: إما موجود أو جديد */
+    const newFolderName = document.getElementById('new-folder-name').value.trim();
+    const folder = selectedFolder || newFolderName;
+    const icon   = selectedIcon || '📁';
+
+    if (!url || !title || !folder) {
+        alert('يرجى تعبئة الرابط والعنوان وتحديد المجلد');
+        return;
+    }
+
+    const data = { title, topic, url, folder, icon, createdAt:Date.now() };
+    showSync('⏳ جاري الحفظ…');
+    try {
+        const ref = await addDoc(userCol(), data);
+        myLibrary.unshift({ id:ref.id, ...data });
+        showSync('✓ تم الحفظ', 'ok');
+        renderMain();
+        closeModal();
+    } catch(e) {
+        console.error(e);
+        showSync('خطأ في الحفظ', 'err');
+    }
+};
+
+/* ══ Delete ══ */
+window.deleteItem = async function(id, topic) {
+    if (!confirm('هل تريد حذف هذا المصدر؟')) return;
+    showSync('⏳ جاري الحذف…');
+    try {
+        await deleteDoc(doc(db,'users',currentUser.uid,'library',id));
+        myLibrary = myLibrary.filter(i=>i.id!==id);
+        showSync('✓ تم الحذف','ok');
+        myLibrary.filter(i=>i.topic===topic&&i.folder===currentOpenType).length
+            ? showLinks(topic) : backToTopics();
+    } catch(e) {
+        showSync('خطأ في الحذف','err');
+    }
+};
+
+/* ══ Logout ══ */
+window.doLogout = async function() {
+    await signOut(auth);
+    window.location.replace('login.html');
+};
+
+/* ══════════════════════════════════
+   RENDER
+══════════════════════════════════ */
+window.renderMain = function() {
+    const c = document.getElementById('main-content-area');
+    c.innerHTML = '';
+    const folders = [...new Set(myLibrary.map(i=>i.folder).filter(Boolean))];
+
+    if (!folders.length) {
+        c.innerHTML = `
+        <div class="col-span-full py-24 text-center rounded-3xl"
+             style="border:2px dashed rgba(255,255,255,0.08);color:#475569;">
+            <div style="font-size:48px;margin-bottom:16px;">📭</div>
+            <p style="font-weight:700;">مكتبتك فارغة — أضف أول مصدر الآن</p>
+        </div>`;
+        return;
+    }
+
+    folders.forEach(folder => {
+        const items = myLibrary.filter(i=>i.folder===folder);
+        const icon  = items[0]?.icon || '📁';
+        const card  = document.createElement('div');
+        card.className = 'glass-card folder-card rounded-[1.8rem] text-center shadow-xl cursor-pointer p-6 md:p-8';
+        card.onclick   = () => showTopics(folder);
+        card.innerHTML = `
+            <div style="font-size:52px;margin-bottom:16px;filter:drop-shadow(0 4px 12px rgba(0,0,0,0.4));">${icon}</div>
+            <h3 style="font-size:16px;font-weight:900;color:#f0f4ff;">${folder}</h3>
+            <p style="font-size:12px;color:#475569;margin-top:6px;">${items.length} مصدر</p>`;
+        c.appendChild(card);
+    });
+};
+
+window.showTopics = function(folder) {
+    currentOpenType = folder;
+    document.getElementById('main-view').classList.add('hidden-view');
+    document.getElementById('topics-view').classList.remove('hidden-view');
+    const folderIcon = myLibrary.find(i=>i.folder===folder)?.icon || '📁';
+    document.getElementById('current-type-title').innerHTML =
+        `<span style="margin-left:10px;">${folderIcon}</span>${folder}`;
+
+    const topics = [...new Set(myLibrary.filter(i=>i.folder===folder).map(i=>i.topic))];
+    document.getElementById('topics-container').innerHTML = topics.map(topic => {
+        const count = myLibrary.filter(i=>i.topic===topic&&i.folder===folder).length;
+        const safe  = topic.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+        return `
+        <div class="glass-card p-5 rounded-2xl flex justify-between items-center cursor-pointer group"
+             style="border-right:3px solid #6366f1;"
+             onclick="showLinks('${safe}')">
+            <div>
+                <h4 style="font-weight:800;font-size:16px;">${topic}</h4>
+                <p style="font-size:12px;color:#475569;margin-top:3px;">${count} مصدر</p>
+            </div>
+            <span style="color:#6366f1;font-size:20px;transition:transform 0.2s;"
+                  class="group-hover:-translate-x-1">←</span>
+        </div>`;
+    }).join('');
+};
+
+window.showLinks = function(topic) {
+    document.getElementById('topics-view').classList.add('hidden-view');
+    document.getElementById('links-view').classList.remove('hidden-view');
+    document.getElementById('current-topic-title').innerText = topic;
+    const links = myLibrary.filter(i=>i.topic===topic&&i.folder===currentOpenType);
+    const safe  = topic.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    document.getElementById('links-container').innerHTML = links.map(link => `
+        <div class="glass-card p-5 rounded-2xl flex justify-between items-center shadow-md group"
+             style="hover:border-color:#6366f1;">
+            <div style="overflow:hidden;flex:1;margin-left:12px;">
+                <h4 style="font-weight:800;margin-bottom:4px;">${link.title}</h4>
+                <p style="font-size:11px;color:#6366f1;opacity:0.7;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${link.url}</p>
+            </div>
+            <div style="display:flex;gap:10px;flex-shrink:0;align-items:center;">
+                <button onclick="deleteItem('${link.id}','${safe}')"
+                    style="color:rgba(248,113,113,0.4);font-size:18px;background:none;border:none;cursor:pointer;transition:color 0.2s;"
+                    onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='rgba(248,113,113,0.4)'">🗑</button>
+                <a href="${link.url}" target="_blank"
+                    style="background:linear-gradient(135deg,#6366f1,#3b82f6);color:#fff;padding:8px 16px;border-radius:10px;font-size:12px;font-weight:700;text-decoration:none;">فتح</a>
+            </div>
+        </div>`).join('');
+};
+
+window.showMainView = function() {
+    document.getElementById('topics-view').classList.add('hidden-view');
+    document.getElementById('main-view').classList.remove('hidden-view');
+    renderMain();
+};
+
+window.backToTopics = function() {
+    document.getElementById('links-view').classList.add('hidden-view');
+    showTopics(currentOpenType);
+};
+
+window.handleSearch = function(q) {
+    const c = document.getElementById('main-content-area');
+    if (!q) { renderMain(); return; }
+    const filtered = myLibrary.filter(i =>
+        i.title.toLowerCase().includes(q.toLowerCase()) ||
+        i.topic.toLowerCase().includes(q.toLowerCase()) ||
+        (i.folder||'').toLowerCase().includes(q.toLowerCase())
+    );
+    c.innerHTML = filtered.length === 0
+        ? '<div class="col-span-full text-center py-12" style="color:#475569;">لا توجد نتائج</div>'
+        : filtered.map(link => `
+            <div class="glass-card p-4 rounded-xl col-span-full flex justify-between items-center gap-4">
+                <div style="overflow:hidden;flex:1;">
+                    <span style="font-size:18px;margin-left:8px;">${link.icon||'📁'}</span>
+                    <b>${link.title}</b>
+                    <span style="font-size:12px;color:#475569;margin-right:8px;"> · ${link.topic}</span>
+                </div>
+                <a href="${link.url}" target="_blank"
+                    style="background:linear-gradient(135deg,#6366f1,#3b82f6);color:#fff;padding:8px 14px;border-radius:10px;font-size:12px;font-weight:700;text-decoration:none;flex-shrink:0;">فتح</a>
+            </div>`).join('');
+};
+
+/* ══ Event Bindings ══ */
+document.getElementById('btn-add').addEventListener('click', () => openModal());
+document.getElementById('btn-logout').addEventListener('click', doLogout);
+
+/* إغلاق الـ modal بالضغط خارجه */
+document.getElementById('modal').addEventListener('click', function(e) {
+    if (e.target === this) closeModal();
+});
+
+/* ══ Share Target ══ */
+window.addEventListener('DOMContentLoaded', () => {
+    const p = new URLSearchParams(window.location.search);
+    const sharedUrl   = p.get('url') || p.get('text');
+    const sharedTitle = p.get('title') || '';
+    if (sharedUrl) {
+        /* انتظر تحميل البيانات ثم افتح الـ modal */
+        const waitAndOpen = setInterval(() => {
+            if (currentUser) {
+                clearInterval(waitAndOpen);
+                openModal(sharedUrl, sharedTitle);
+                window.history.replaceState({}, document.title, window.location.pathname);
+            }
+        }, 300);
+    }
+});
+
+/* Service Worker */
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
+
+</script>
+</body>
+</html>
